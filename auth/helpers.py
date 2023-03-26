@@ -59,7 +59,7 @@ class JWTAuthenticationBackend(AuthenticationBackend):
             raise AuthenticationError(str(e))
         subject = json.loads(payload[self.username_field])
         return AuthCredentials(["authenticated"]), JWTUser(
-            username=subject["email"], user_id=subject["user_id"], token=token, payload=payload)
+            username=subject["username"], user_id=subject["user_id"], token=token, payload=payload)
 
 
 async def authentication_required(request: Request, token: str = Depends(oauth2_scheme)):

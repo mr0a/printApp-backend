@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from datetime import timedelta, datetime
 
 from fastapi import Depends, HTTPException, status, APIRouter, Body, Request
@@ -12,7 +13,7 @@ from typing import Optional
 
 from app.core.schemas import LoginResponse
 from app.core.config import settings
-from app.database import User
+from app.database import User, Repro
 from auth.schemas import User as PDUser
 
 from auth.helpers import authentication_required
@@ -27,15 +28,15 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
+        expire = datetime.utcnow() + timedelta(minutes=30)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
 
 
-async def authenticate_user(email, password):
+async def authenticate_user(Model, email, password):
     try:
-        user = await User.objects.get(email=email)
+        user = await Model.objects.get(email=email)
     except NoMatch as exe:
         raise AuthenticationError("Username or password is incorrect!")
     if not user.active:
@@ -59,7 +60,7 @@ def get_access_token(data):
 @router.post("/token", response_model=LoginResponse)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
     try:
-        user = await authenticate_user(form_data.username, form_data.password)
+        user = await authenticate_user(User, form_data.username, form_data.password)
     except AuthenticationError as error:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail={"error": str(error)})
     if not user:
@@ -68,13 +69,12 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    access_token = get_access_token({"email": user.username, "user_id": user.id})
+    access_token = get_access_token({"user_id": user.id, "username": user.username})
     return {
         "access_token": access_token,
         "token_type": "bearer",
         "username": user.username,
-        "credits": user.credits,
-        "is_repro_admin": user.is_repro_admin
+        "credits": user.credits
     }
 
 
@@ -85,12 +85,12 @@ async def create_user(user_data: PDUser = Body()):
     print(hashed_password)
     try:
         user = await User.objects.create(hashed_password=hashed_password, **user_data.dict(exclude={'password'}))
-    except UniqueViolationError:
+    except (UniqueViolationError, sqlite3.IntegrityError) as exception:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User with the given email already exists!"
         )
-    access_token = get_access_token(user.username)
+    access_token = get_access_token({"user_id": user.id, "username": user.username})
     return {"access_token": access_token, "token_type": "bearer"}
 
 
@@ -110,3 +110,39 @@ async def logout_user(request: Request):
 async def callback():
     return "Callback"
 
+
+@router.post("/reprography")
+# async def create_user(username: str = Body(), password: str = Body(), ):
+async def create_user(user_data: PDUser = Body()):
+    hashed_password = pwd_context.hash(user_data.password)
+    print(hashed_password)
+    try:
+        user = await Repro.objects.create(hashed_password=hashed_password, **user_data.dict(exclude={'password'}))
+    except (UniqueViolationError, sqlite3.IntegrityError) as exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User with the given email already exists!"
+        )
+    access_token = get_access_token(user.username)
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+@router.post("/reprography/token", response_model=LoginResponse)
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
+    try:
+        user = await authenticate_user(Repro, form_data.username, form_data.password)
+    except AuthenticationError as error:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail={"error": str(error)})
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token = get_access_token({"user_id": user.id})
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "username": user.username,
+        "credits": user.credits
+    }
