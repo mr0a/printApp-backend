@@ -126,6 +126,13 @@ async def create_user(user_data: PDUser = Body()):
     access_token = get_access_token(user.username)
     return {"access_token": access_token, "token_type": "bearer"}
 
+@router.delete("/reprography")
+async def delete_repro(data):
+    print(data)
+    repro = await Repro.objects.all(username = data)
+    # await repro.delete()
+    return {"status": f"Repro {data} deleted successfully!"}
+
 
 @router.post("/reprography/token", response_model=LoginResponse)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
